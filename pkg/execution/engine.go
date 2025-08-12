@@ -365,10 +365,8 @@ func (e *Engine) executeStep(step *scenario.Step, varContext *variables.Context)
 	}
 
 	// Check condition if specified
-	if step.Condition != "" {
-		// TODO: Implement condition evaluation
-		// For now, assume all conditions pass
-	}
+	// TODO: Implement condition evaluation
+	// For now, assume all conditions pass
 
 	// Handle new HTTP step format
 	if step.HTTP != nil {

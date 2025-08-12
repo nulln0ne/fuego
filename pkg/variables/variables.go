@@ -167,9 +167,7 @@ func (c *Context) InterpolateString(input string) (string, error) {
 		}
 
 		// Handle env.variable syntax
-		if strings.HasPrefix(varName, "env.") {
-			varName = strings.TrimPrefix(varName, "env.")
-		}
+		varName = strings.TrimPrefix(varName, "env.")
 
 		// Handle dot notation for nested object access
 		value, exists := c.GetNested(varName)

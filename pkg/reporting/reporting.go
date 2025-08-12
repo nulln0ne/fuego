@@ -148,9 +148,10 @@ func (r *Reporter) generateConsoleReport() error {
 	// Print scenario details
 	for _, scenario := range r.report.Scenarios {
 		status := "✓"
-		if scenario.Status == "failed" {
+		switch scenario.Status {
+		case "failed":
 			status = "✗"
-		} else if scenario.Status == "skipped" {
+		case "skipped":
 			status = "⊖"
 		}
 
@@ -159,9 +160,10 @@ func (r *Reporter) generateConsoleReport() error {
 		if r.config.Verbose {
 			for _, step := range scenario.Steps {
 				stepStatus := "  ✓"
-				if step.Status == "failed" {
+				switch step.Status {
+				case "failed":
 					stepStatus = "  ✗"
-				} else if step.Status == "skipped" {
+				case "skipped":
 					stepStatus = "  ⊖"
 				}
 
@@ -312,9 +314,10 @@ func (r *Reporter) generateMarkdownContent() string {
 	scenariosMarkdown := ""
 	for _, scenario := range r.report.Scenarios {
 		status := "✅"
-		if scenario.Status == "failed" {
+		switch scenario.Status {
+		case "failed":
 			status = "❌"
-		} else if scenario.Status == "skipped" {
+		case "skipped":
 			status = "⏭️"
 		}
 
@@ -325,9 +328,10 @@ func (r *Reporter) generateMarkdownContent() string {
 			scenariosMarkdown += "### Steps\n\n"
 			for _, step := range scenario.Steps {
 				stepStatus := "✅"
-				if step.Status == "failed" {
+				switch step.Status {
+				case "failed":
 					stepStatus = "❌"
-				} else if step.Status == "skipped" {
+				case "skipped":
 					stepStatus = "⏭️"
 				}
 

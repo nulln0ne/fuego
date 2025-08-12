@@ -65,7 +65,7 @@ func (e *Engine) runAssertion(assertion scenario.Assertion, response interface{}
 		// Special handling for JSON schema assertions with variable references
 		if assertion.Type == "json_schema" && strings.Contains(expectedStr, "{{") {
 			// For JSON schema, try to get the variable directly instead of interpolating as string
-			variableName := strings.TrimSpace(strings.Trim(strings.Trim(expectedStr, "{{"), "}}"))
+			variableName := strings.TrimSpace(strings.Trim(strings.Trim(expectedStr, "{"), "}"))
 			if varValue, exists := e.varContext.Get(variableName); exists {
 				expectedValue = varValue
 			} else {

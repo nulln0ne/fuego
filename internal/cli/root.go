@@ -35,7 +35,9 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.fuego.yaml)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 
-	viper.BindPFlag("verbose", rootCmd.PersistentFlags().Lookup("verbose"))
+	if err := viper.BindPFlag("verbose", rootCmd.PersistentFlags().Lookup("verbose")); err != nil {
+		fmt.Printf("Error binding verbose flag: %s", err)
+	}
 }
 
 func initConfig() {
