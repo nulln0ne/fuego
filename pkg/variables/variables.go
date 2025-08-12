@@ -49,6 +49,70 @@ func (c *Context) Get(key string) (interface{}, bool) {
 	return nil, false
 }
 
+func (c *Context) GetNested(path string) (interface{}, bool) {
+	// If no dot notation, use regular Get
+	if !strings.Contains(path, ".") {
+		return c.Get(path)
+	}
+
+	// Split path into parts
+	parts := strings.Split(path, ".")
+	rootKey := parts[0]
+	
+	// Get the root object
+	current, exists := c.Get(rootKey)
+	if !exists {
+		return nil, false
+	}
+
+	// Navigate through the path
+	for _, part := range parts[1:] {
+		switch v := current.(type) {
+		case map[string]interface{}:
+			if value, ok := v[part]; ok {
+				current = value
+			} else {
+				return nil, false
+			}
+		case map[interface{}]interface{}:
+			if value, ok := v[part]; ok {
+				current = value
+			} else {
+				return nil, false
+			}
+		default:
+			// Try to access as JSON-like object through reflection
+			if jsonData, err := c.accessJSONPath(current, part); err == nil {
+				current = jsonData
+			} else {
+				return nil, false
+			}
+		}
+	}
+
+	return current, true
+}
+
+func (c *Context) accessJSONPath(data interface{}, key string) (interface{}, error) {
+	// Try to convert to map[string]interface{} via JSON marshaling/unmarshaling
+	// This handles cases where the data might be in a different map type
+	jsonBytes, err := json.Marshal(data)
+	if err != nil {
+		return nil, err
+	}
+
+	var jsonMap map[string]interface{}
+	if err := json.Unmarshal(jsonBytes, &jsonMap); err != nil {
+		return nil, err
+	}
+
+	if value, exists := jsonMap[key]; exists {
+		return value, nil
+	}
+
+	return nil, fmt.Errorf("key %s not found", key)
+}
+
 func (c *Context) GetAll() map[string]interface{} {
 	result := make(map[string]interface{})
 
@@ -107,7 +171,8 @@ func (c *Context) InterpolateString(input string) (string, error) {
 			varName = strings.TrimPrefix(varName, "env.")
 		}
 
-		value, exists := c.Get(varName)
+		// Handle dot notation for nested object access
+		value, exists := c.GetNested(varName)
 		if !exists {
 			return match // Return original if variable not found
 		}

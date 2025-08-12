@@ -11,6 +11,7 @@ import (
 
 	"github.com/nulln0ne/fuego/pkg/scenario"
 	"github.com/nulln0ne/fuego/pkg/variables"
+	"github.com/xeipuuv/gojsonschema"
 )
 
 type Result struct {
@@ -61,13 +62,31 @@ func (e *Engine) runAssertion(assertion scenario.Assertion, response interface{}
 	// Interpolate expected value if it's a string template
 	expectedValue := assertion.Value
 	if expectedStr, ok := assertion.Value.(string); ok {
-		interpolated, err := e.varContext.InterpolateString(expectedStr)
-		if err != nil {
-			result.Passed = false
-			result.Message = fmt.Sprintf("Failed to interpolate expected value: %v", err)
-			return result, nil
+		// Special handling for JSON schema assertions with variable references
+		if assertion.Type == "json_schema" && strings.Contains(expectedStr, "{{") {
+			// For JSON schema, try to get the variable directly instead of interpolating as string
+			variableName := strings.TrimSpace(strings.Trim(strings.Trim(expectedStr, "{{"), "}}"))
+			if varValue, exists := e.varContext.Get(variableName); exists {
+				expectedValue = varValue
+			} else {
+				// Fall back to string interpolation
+				interpolated, err := e.varContext.InterpolateString(expectedStr)
+				if err != nil {
+					result.Passed = false
+					result.Message = fmt.Sprintf("Failed to interpolate expected value: %v", err)
+					return result, nil
+				}
+				expectedValue = interpolated
+			}
+		} else {
+			interpolated, err := e.varContext.InterpolateString(expectedStr)
+			if err != nil {
+				result.Passed = false
+				result.Message = fmt.Sprintf("Failed to interpolate expected value: %v", err)
+				return result, nil
+			}
+			expectedValue = interpolated
 		}
-		expectedValue = interpolated
 	}
 
 	// Extract actual value based on assertion type
@@ -117,6 +136,8 @@ func (e *Engine) extractValue(assertion scenario.Assertion, response interface{}
 		return e.extractResponseTime(response)
 	case "size":
 		return e.extractResponseSize(response)
+	case "json_schema":
+		return e.extractBody(response) // For JSON schema validation, we validate the entire body
 	default:
 		return nil, fmt.Errorf("unsupported assertion type: %s", assertion.Type)
 	}
@@ -318,6 +339,8 @@ func (e *Engine) compare(actual, expected interface{}, operator string) (bool, s
 		return e.compareEndsWith(actual, expected)
 	case "length":
 		return e.compareLength(actual, expected)
+	case "json_schema":
+		return e.compareJSONSchema(actual, expected)
 	default:
 		return false, fmt.Sprintf("unsupported operator: %s", operator)
 	}
@@ -525,4 +548,44 @@ func (e *Engine) getLength(value interface{}) int {
 	default:
 		return 0
 	}
+}
+
+func (e *Engine) compareJSONSchema(actual, expected interface{}) (bool, string) {
+	// Convert actual value to string if it's not already
+	actualStr, ok := actual.(string)
+	if !ok {
+		actualBytes, err := json.Marshal(actual)
+		if err != nil {
+			return false, fmt.Sprintf("failed to marshal actual value for schema validation: %v", err)
+		}
+		actualStr = string(actualBytes)
+	}
+
+	// Expected should be the JSON schema (now properly resolved)
+	schemaBytes, err := json.Marshal(expected)
+	if err != nil {
+		return false, fmt.Sprintf("failed to marshal schema: %v", err)
+	}
+
+	// Create schema loader
+	schemaLoader := gojsonschema.NewStringLoader(string(schemaBytes))
+	documentLoader := gojsonschema.NewStringLoader(actualStr)
+
+	// Validate
+	result, err := gojsonschema.Validate(schemaLoader, documentLoader)
+	if err != nil {
+		return false, fmt.Sprintf("schema validation error: %v", err)
+	}
+
+	if result.Valid() {
+		return true, "JSON response validates against provided schema"
+	}
+
+	// Collect validation errors
+	var errorMessages []string
+	for _, desc := range result.Errors() {
+		errorMessages = append(errorMessages, desc.String())
+	}
+
+	return false, fmt.Sprintf("JSON schema validation failed: %s", strings.Join(errorMessages, "; "))
 }

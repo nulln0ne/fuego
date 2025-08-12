@@ -1,0 +1,190 @@
+version: "1.1"
+name: "JSON Schema Validation Example"
+description: "Demonstrates JSON Schema validation capabilities"
+
+env:
+  host: jsonplaceholder.typicode.com
+  protocol: https
+
+# Define reusable schemas as variables
+variables:
+  user_schema:
+    type: object
+    properties:
+      id:
+        type: integer
+        minimum: 1
+      name:
+        type: string
+        minLength: 1
+      username:
+        type: string
+        minLength: 1
+      email:
+        type: string
+        format: email
+      address:
+        type: object
+        properties:
+          street:
+            type: string
+          suite:
+            type: string
+          city:
+            type: string
+          zipcode:
+            type: string
+        required: [street, city, zipcode]
+      phone:
+        type: string
+      website:
+        type: string
+      company:
+        type: object
+        properties:
+          name:
+            type: string
+          catchPhrase:
+            type: string
+          bs:
+            type: string
+        required: [name]
+    required: [id, name, username, email]
+
+  post_schema:
+    type: object
+    properties:
+      userId:
+        type: integer
+        minimum: 1
+      id:
+        type: integer
+        minimum: 1
+      title:
+        type: string
+        minLength: 1
+      body:
+        type: string
+        minLength: 1
+    required: [userId, id, title, body]
+
+  posts_array_schema:
+    type: array
+    items:
+      $ref: "#/variables/post_schema"
+    minItems: 1
+
+tests:
+  user_validation:
+    name: "User Schema Validation"
+    steps:
+      - name: "Get User and Validate Schema"
+        http:
+          url: ${{env.protocol}}://${{env.host}}/users/1
+          method: GET
+        check:
+          status: 200
+        assertions:
+          - type: json_schema
+            operator: json_schema
+            value: "{{user_schema}}"
+            description: "User response should match user schema"
+
+      - name: "Get All Users and Validate Each"
+        http:
+          url: ${{env.protocol}}://${{env.host}}/users
+          method: GET
+        check:
+          status: 200
+        assertions:
+          - type: json_schema
+            operator: json_schema
+            value:
+              type: array
+              items: "{{user_schema}}"
+              minItems: 1
+              maxItems: 100
+            description: "Users array should contain valid user objects"
+
+  post_validation:
+    name: "Post Schema Validation"
+    steps:
+      - name: "Get Single Post and Validate"
+        http:
+          url: ${{env.protocol}}://${{env.host}}/posts/1
+          method: GET
+        check:
+          status: 200
+        assertions:
+          - type: json_schema
+            operator: json_schema
+            value: "{{post_schema}}"
+            description: "Post response should match post schema"
+
+      - name: "Get User Posts and Validate Array"
+        http:
+          url: ${{env.protocol}}://${{env.host}}/posts?userId=1
+          method: GET
+        check:
+          status: 200
+        assertions:
+          - type: json_schema
+            operator: json_schema
+            value:
+              type: array
+              items: "{{post_schema}}"
+              minItems: 1
+            description: "Posts array should contain valid post objects"
+
+  create_post_validation:
+    name: "Create Post with Schema Validation"
+    steps:
+      - name: "Create New Post"
+        http:
+          url: ${{env.protocol}}://${{env.host}}/posts
+          method: POST
+          json:
+            title: "Test Post"
+            body: "This is a test post created by Fuego"
+            userId: 1
+        check:
+          status: 201
+        assertions:
+          - type: json_schema
+            operator: json_schema
+            value:
+              type: object
+              properties:
+                id:
+                  type: integer
+                  minimum: 1
+                title:
+                  type: string
+                  const: "Test Post"
+                body:
+                  type: string
+                  const: "This is a test post created by Fuego"
+                userId:
+                  type: integer
+                  const: 1
+              required: [id, title, body, userId]
+            description: "Created post should match expected schema and values"
+
+  error_validation:
+    name: "Error Response Schema Validation"
+    steps:
+      - name: "Test 404 Error Response"
+        http:
+          url: ${{env.protocol}}://${{env.host}}/posts/99999
+          method: GET
+        check:
+          status: 404
+        assertions:
+          - type: json_schema
+            operator: json_schema
+            value:
+              type: object
+              properties: {}
+              additionalProperties: false
+            description: "404 response should be empty object"
+            optional: true  # Some APIs might return different error formats

@@ -1,0 +1,116 @@
+version: "1.1"
+name: "Data-Driven Testing Example"
+description: "Demonstrates data-driven testing with CSV and JSON data sources"
+
+env:
+  host: jsonplaceholder.typicode.com
+  protocol: https
+
+# Define data sources
+data:
+  users:
+    type: csv
+    path: examples/test-data.csv
+  
+  posts:
+    type: json
+    path: examples/user-data.json
+    
+  inline_data:
+    type: inline
+    data:
+      - name: "Inline Test 1"
+        value: 100
+      - name: "Inline Test 2" 
+        value: 200
+
+tests:
+  user_validation:
+    name: "User Data Validation"
+    data_driven:
+      source: users
+      variable: user
+    steps:
+      - name: "Get User by ID"
+        http:
+          url: ${{env.protocol}}://${{env.host}}/users/${{user.id}}
+          method: GET
+        check:
+          status: ${{user.expected_status}}
+        assertions:
+          - type: json_path
+            field: name
+            operator: contains
+            value: ""
+            description: "User should have a name"
+          - type: json_path
+            field: email
+            operator: contains
+            value: "@"
+            description: "User should have valid email format"
+
+  post_creation:
+    name: "Create Posts with Data"
+    data_driven:
+      source: posts
+      variable: post_data
+    steps:
+      - name: "Create New Post"
+        http:
+          url: ${{env.protocol}}://${{env.host}}/posts
+          method: POST
+          json:
+            title: ${{post_data.title}}
+            body: ${{post_data.body}}
+            userId: ${{post_data.userId}}
+        check:
+          status: ${{post_data.expectedStatus}}
+        assertions:
+          - type: json_path
+            field: title
+            operator: eq
+            value: ${{post_data.title}}
+            description: "Created post should have correct title"
+          - type: json_path
+            field: userId
+            operator: eq
+            value: ${{post_data.userId}}
+            description: "Created post should have correct user ID"
+
+  inline_data_test:
+    name: "Inline Data Testing"
+    data_driven:
+      source: inline_data
+      variable: item
+    steps:
+      - name: "Test with Inline Data"
+        http:
+          url: ${{env.protocol}}://${{env.host}}/posts/1
+          method: GET
+        check:
+          status: 200
+        assertions:
+          - type: json_path
+            field: id
+            operator: eq
+            value: 1
+            description: "Post ID should be 1 (testing with ${{item.name}})"
+
+  single_step_data_driven:
+    name: "Single Step Data-Driven Test"
+    steps:
+      - name: "Validate Multiple Users"
+        data_driven:
+          source: users
+          variable: user_data
+        http:
+          url: ${{env.protocol}}://${{env.host}}/users/${{user_data.id}}
+          method: GET
+        check:
+          status: ${{user_data.expected_status}}
+        assertions:
+          - type: json_path
+            field: id
+            operator: eq
+            value: ${{user_data.id}}
+            description: "User ID should match requested ID"

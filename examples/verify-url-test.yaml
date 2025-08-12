@@ -1,0 +1,21 @@
+version: "1.0"
+name: "URL Verification Test"
+
+env:
+  host: jsonplaceholder.typicode.com
+  protocol: https
+
+variables:
+  test_id: 1
+
+steps:
+  - name: "Direct ID Test"
+    type: http
+    request:
+      method: GET
+      url: "${{env.protocol}}://${{env.host}}/users/${{test_id}}"
+    assertions:
+      - type: status_code
+        operator: eq
+        value: 200
+        description: "Should get user successfully"

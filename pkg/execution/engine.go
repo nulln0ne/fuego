@@ -7,6 +7,7 @@ import (
 
 	"github.com/nulln0ne/fuego/pkg/assertions"
 	"github.com/nulln0ne/fuego/pkg/config"
+	"github.com/nulln0ne/fuego/pkg/data"
 	"github.com/nulln0ne/fuego/pkg/protocols"
 	"github.com/nulln0ne/fuego/pkg/reporting"
 	"github.com/nulln0ne/fuego/pkg/scenario"
@@ -18,6 +19,7 @@ type Engine struct {
 	reporter   *reporting.Reporter
 	varContext *variables.Context
 	httpClient *protocols.HTTPClient
+	dataLoader *data.DataLoader
 }
 
 func NewEngine(cfg *config.Config, reporter *reporting.Reporter) *Engine {
@@ -38,11 +40,15 @@ func NewEngine(cfg *config.Config, reporter *reporting.Reporter) *Engine {
 		FollowRedirects: cfg.Defaults.FollowRedirect,
 	})
 
+	// Create data loader (using current working directory as base)
+	dataLoader := data.NewDataLoader(".")
+
 	return &Engine{
 		config:     cfg,
 		reporter:   reporter,
 		varContext: varContext,
 		httpClient: httpClient,
+		dataLoader: dataLoader,
 	}
 }
 
@@ -85,6 +91,29 @@ func (e *Engine) executeScenario(sc *scenario.Scenario) reporting.ScenarioResult
 				scenarioContext.SetLocal(k, v)
 			}
 		}
+	}
+
+	// Load data sources
+	loadedData := make(map[string][]map[string]interface{})
+	for name, scenarioDataSource := range sc.Data {
+		// Convert scenario.DataSource to data.DataSource
+		dataSource := data.DataSource{
+			Type: scenarioDataSource.Type,
+			Path: scenarioDataSource.Path,
+			Data: scenarioDataSource.Data,
+		}
+		
+		dataItems, err := e.dataLoader.LoadData(dataSource)
+		if err != nil {
+			result.Status = "failed"
+			result.Error = fmt.Sprintf("Failed to load data source '%s': %v", name, err)
+			result.EndTime = time.Now()
+			result.Duration = result.EndTime.Sub(result.StartTime)
+			return result
+		}
+		loadedData[name] = dataItems
+		// Also make data available as variables
+		scenarioContext.SetLocal(name, dataItems)
 	}
 
 	// Execute before hook
@@ -207,6 +236,12 @@ func (e *Engine) executeTestGroup(test *scenario.TestGroup, testName string, var
 		varContext.SetLocal(k, v)
 	}
 
+	// Check if test group is data-driven
+	if test.DataDriven != nil {
+		e.executeDataDrivenTestGroup(test, testName, varContext, result)
+		return
+	}
+
 	// Execute test steps
 	for _, step := range test.Steps {
 		stepResult := e.executeStep(&step, varContext)
@@ -218,6 +253,95 @@ func (e *Engine) executeTestGroup(test *scenario.TestGroup, testName string, var
 			break
 		}
 	}
+}
+
+func (e *Engine) executeDataDrivenTestGroup(test *scenario.TestGroup, testName string, varContext *variables.Context, result *reporting.ScenarioResult) {
+	// Get data source
+	dataSource, exists := varContext.Get(test.DataDriven.Source)
+	if !exists {
+		result.Status = "failed"
+		result.Error = fmt.Sprintf("Data source '%s' not found for test group '%s'", test.DataDriven.Source, testName)
+		return
+	}
+
+	dataItems, ok := dataSource.([]map[string]interface{})
+	if !ok {
+		result.Status = "failed"
+		result.Error = fmt.Sprintf("Data source '%s' is not a valid data array", test.DataDriven.Source)
+		return
+	}
+
+	// Execute test steps for each data item
+	for i, dataItem := range dataItems {
+		// Create a new context for this iteration
+		iterationContext := varContext.Clone()
+		
+		// Set the data item variable
+		iterationContext.SetStep(test.DataDriven.Variable, dataItem)
+		
+		// Execute test steps
+		for _, step := range test.Steps {
+			stepResult := e.executeStep(&step, iterationContext)
+			stepResult.Step.Name = fmt.Sprintf("%s (data %d)", step.Name, i+1)
+			result.Steps = append(result.Steps, stepResult)
+
+			if stepResult.Status == "failed" && !test.ContinueOnFail {
+				result.Status = "failed"
+				result.Error = fmt.Sprintf("Test '%s' step '%s' failed on data item %d", testName, step.Name, i+1)
+				return
+			}
+		}
+	}
+}
+
+func (e *Engine) executeDataDrivenStep(step *scenario.Step, varContext *variables.Context) reporting.StepResult {
+	// Get data source
+	dataSource, exists := varContext.Get(step.DataDriven.Source)
+	if !exists {
+		return reporting.StepResult{
+			Step:      step,
+			StartTime: time.Now(),
+			EndTime:   time.Now(),
+			Status:    "failed",
+			Error:     fmt.Sprintf("Data source '%s' not found for step '%s'", step.DataDriven.Source, step.Name),
+		}
+	}
+
+	dataItems, ok := dataSource.([]map[string]interface{})
+	if !ok {
+		return reporting.StepResult{
+			Step:      step,
+			StartTime: time.Now(),
+			EndTime:   time.Now(),
+			Status:    "failed",
+			Error:     fmt.Sprintf("Data source '%s' is not a valid data array", step.DataDriven.Source),
+		}
+	}
+
+	// Execute step for each data item - for now, we'll execute and return the last result
+	// In a real implementation, you might want to collect all results
+	var lastResult reporting.StepResult
+	for i, dataItem := range dataItems {
+		// Create a new context for this iteration
+		iterationContext := varContext.Clone()
+		
+		// Set the data item variable
+		iterationContext.SetStep(step.DataDriven.Variable, dataItem)
+		
+		// Create a modified step without data-driven config to avoid infinite recursion
+		modifiedStep := *step
+		modifiedStep.DataDriven = nil
+		modifiedStep.Name = fmt.Sprintf("%s (data %d)", step.Name, i+1)
+		
+		lastResult = e.executeStep(&modifiedStep, iterationContext)
+		
+		// If step fails and we don't want to continue, break
+		if lastResult.Status == "failed" {
+			break
+		}
+	}
+
+	return lastResult
 }
 
 func (e *Engine) executeStep(step *scenario.Step, varContext *variables.Context) reporting.StepResult {
@@ -233,6 +357,11 @@ func (e *Engine) executeStep(step *scenario.Step, varContext *variables.Context)
 	// Add step variables
 	for k, v := range step.Variables {
 		varContext.SetStep(k, v)
+	}
+
+	// Check if step is data-driven
+	if step.DataDriven != nil {
+		return e.executeDataDrivenStep(step, varContext)
 	}
 
 	// Check condition if specified

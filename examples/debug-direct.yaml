@@ -1,0 +1,21 @@
+version: "1.1"
+name: "Debug Direct"
+
+env:
+  host: jsonplaceholder.typicode.com
+  protocol: https
+
+variables:
+  item:
+    id: 1
+
+tests:
+  debug:
+    name: "Debug Test"
+    steps:
+      - name: "Make Request"
+        http:
+          url: ${{env.protocol}}://${{env.host}}/users/${{item.id}}
+          method: GET
+        check:
+          status: 200

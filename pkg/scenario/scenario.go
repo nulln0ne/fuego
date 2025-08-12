@@ -15,6 +15,7 @@ type Scenario struct {
 	Description string                `yaml:"description,omitempty" json:"description,omitempty"`
 	Env         map[string]any        `yaml:"env,omitempty" json:"env,omitempty"`
 	Variables   map[string]any        `yaml:"variables,omitempty" json:"variables,omitempty"`
+	Data        map[string]DataSource `yaml:"data,omitempty" json:"data,omitempty"`
 	Config      *ScenarioConfig       `yaml:"config,omitempty" json:"config,omitempty"`
 	Before      *TestGroup            `yaml:"before,omitempty" json:"before,omitempty"`
 	Setup       []Step                `yaml:"setup,omitempty" json:"setup,omitempty"`
@@ -26,11 +27,12 @@ type Scenario struct {
 }
 
 type TestGroup struct {
-	Name           string         `yaml:"name,omitempty" json:"name,omitempty"`
-	Env            map[string]any `yaml:"env,omitempty" json:"env,omitempty"`
-	Skip           bool           `yaml:"skip,omitempty" json:"skip,omitempty"`
-	ContinueOnFail bool           `yaml:"continueOnFail,omitempty" json:"continueOnFail,omitempty"`
-	Steps          []Step         `yaml:"steps" json:"steps"`
+	Name           string            `yaml:"name,omitempty" json:"name,omitempty"`
+	Env            map[string]any    `yaml:"env,omitempty" json:"env,omitempty"`
+	Skip           bool              `yaml:"skip,omitempty" json:"skip,omitempty"`
+	ContinueOnFail bool              `yaml:"continueOnFail,omitempty" json:"continueOnFail,omitempty"`
+	DataDriven     *DataDrivenConfig `yaml:"data_driven,omitempty" json:"data_driven,omitempty"`
+	Steps          []Step            `yaml:"steps" json:"steps"`
 }
 
 type ScenarioConfig struct {
@@ -70,6 +72,7 @@ type Step struct {
 	Variables   map[string]any         `yaml:"variables,omitempty" json:"variables,omitempty"`
 	Condition   string                 `yaml:"condition,omitempty" json:"condition,omitempty"`
 	Loop        *LoopConfig            `yaml:"loop,omitempty" json:"loop,omitempty"`
+	DataDriven  *DataDrivenConfig      `yaml:"data_driven,omitempty" json:"data_driven,omitempty"`
 	Retry       *RetryConfig           `yaml:"retry,omitempty" json:"retry,omitempty"`
 	Timeout     time.Duration          `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 	DependsOn   []string               `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
@@ -136,6 +139,17 @@ type RetryConfig struct {
 	Delay     time.Duration `yaml:"delay,omitempty" json:"delay,omitempty"`
 	Backoff   string        `yaml:"backoff,omitempty" json:"backoff,omitempty"` // linear, exponential
 	Condition string        `yaml:"condition,omitempty" json:"condition,omitempty"`
+}
+
+type DataSource struct {
+	Type string      `yaml:"type" json:"type"` // csv, json, inline
+	Path string      `yaml:"path,omitempty" json:"path,omitempty"`
+	Data interface{} `yaml:"data,omitempty" json:"data,omitempty"`
+}
+
+type DataDrivenConfig struct {
+	Source   string `yaml:"source" json:"source"`     // Name of data source from scenario.data
+	Variable string `yaml:"variable" json:"variable"` // Variable name to store current data item
 }
 
 func LoadScenario(filename string) (*Scenario, error) {
