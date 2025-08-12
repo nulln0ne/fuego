@@ -2,6 +2,9 @@ package execution
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -351,12 +354,18 @@ func (e *Engine) executeStep(step *scenario.Step, varContext *variables.Context)
 		Variables: make(map[string]interface{}),
 	}
 
-	// Clear step-specific variables
-	varContext.ClearStep()
-
 	// Add step variables
 	for k, v := range step.Variables {
 		varContext.SetStep(k, v)
+	}
+
+	// If this is just a variable-setting step, mark as passed.
+	if step.Type == "" && step.HTTP == nil {
+		result.Status = "passed"
+		result.EndTime = time.Now()
+		result.Duration = result.EndTime.Sub(result.StartTime)
+		result.Variables = varContext.GetAll()
+		return result
 	}
 
 	// Check if step is data-driven
@@ -365,8 +374,24 @@ func (e *Engine) executeStep(step *scenario.Step, varContext *variables.Context)
 	}
 
 	// Check condition if specified
-	// TODO: Implement condition evaluation
-	// For now, assume all conditions pass
+	if step.Condition != "" {
+		passed, err := e.evaluateCondition(step.Condition, varContext)
+		if err != nil {
+			result.Status = "failed"
+			result.Error = fmt.Sprintf("invalid condition: %v", err)
+			result.EndTime = time.Now()
+			result.Duration = result.EndTime.Sub(result.StartTime)
+			return result
+		}
+
+		if !passed {
+			result.Status = "skipped"
+			result.Error = fmt.Sprintf("condition not met: %s", step.Condition)
+			result.EndTime = time.Now()
+			result.Duration = result.EndTime.Sub(result.StartTime)
+			return result
+		}
+	}
 
 	// Handle new HTTP step format
 	if step.HTTP != nil {
@@ -453,6 +478,28 @@ func (e *Engine) executeStep(step *scenario.Step, varContext *variables.Context)
 	return result
 }
 
+func (e *Engine) evaluateCondition(condition string, varContext *variables.Context) (bool, error) {
+	interpolated, err := varContext.InterpolateString(condition)
+	if err != nil {
+		return false, fmt.Errorf("failed to interpolate condition: %w", err)
+	}
+
+	// Simple truthiness check
+	switch strings.ToLower(strings.TrimSpace(interpolated)) {
+	case "true", "yes", "on":
+		return true, nil
+	case "false", "no", "off", "":
+		return false, nil
+	}
+
+	// Try parsing as a number
+	if num, err := strconv.ParseFloat(interpolated, 64); err == nil {
+		return num > 0, nil
+	}
+
+	return false, fmt.Errorf("unsupported condition value: '%s'", interpolated)
+}
+
 func (e *Engine) executeHTTPStep(step *scenario.Step, varContext *variables.Context) (interface{}, error) {
 	// Interpolate request values
 	interpolatedStep := *step
@@ -513,17 +560,34 @@ func (e *Engine) executeHTTPStep(step *scenario.Step, varContext *variables.Cont
 }
 
 func (e *Engine) extractVariables(step *scenario.Step, response interface{}, varContext *variables.Context) {
-	// TODO: Implement variable extraction from response based on step configuration
-	// This would parse extraction rules like:
-	// variables:
-	//   token: "json:access_token"
-	//   user_id: "json:user.id"
-	//   session_id: "header:Set-Cookie"
+	// This is for legacy variable extraction. The new format uses `capture`.
+	if len(step.Variables) == 0 {
+		// For backward compatibility, add basic response data as variables if no new variables are defined.
+		if responseMap, ok := response.(map[string]interface{}); ok {
+			varContext.SetStep("last_status", responseMap["status_code"])
+			varContext.SetStep("last_response", responseMap["body_text"])
+		}
+		return
+	}
 
-	// For now, we'll add basic response data as variables
-	if responseMap, ok := response.(map[string]interface{}); ok {
-		varContext.SetStep("last_status", responseMap["status_code"])
-		varContext.SetStep("last_response", responseMap["body_text"])
+	responseMap, ok := response.(map[string]interface{})
+	if !ok {
+		// Cannot extract from a non-map response
+		return
+	}
+
+	for varName, extractor := range step.Variables {
+		extractorStr, ok := extractor.(string)
+		if !ok {
+			// If the value is not a string, treat it as a literal value to be set.
+			varContext.SetStep(varName, extractor)
+			continue
+		}
+
+		value, err := variables.ExtractFromResponse(responseMap, extractorStr)
+		if err == nil {
+			varContext.SetStep(varName, value)
+		}
 	}
 }
 
@@ -563,20 +627,42 @@ func (e *Engine) processCaptures(captures map[string]scenario.Capture, response 
 		var value interface{}
 		var err error
 
+		responseMap, ok := response.(map[string]interface{})
+		if !ok {
+			// cannot capture from non-map response
+			continue
+		}
+
 		switch {
 		case capture.JSONPath != "":
-			value, err = variables.ExtractFromResponse(response.(map[string]interface{}), "json:"+capture.JSONPath)
+			value, err = variables.ExtractFromResponse(responseMap, "json:"+capture.JSONPath)
 		case capture.Header != "":
-			value, err = variables.ExtractFromResponse(response.(map[string]interface{}), "header:"+capture.Header)
+			value, err = variables.ExtractFromResponse(responseMap, "header:"+capture.Header)
 		case capture.Regex != "":
-			// TODO: Implement regex capture
-			err = fmt.Errorf("regex capture not yet implemented")
+			bodyText, ok := responseMap["body_text"].(string)
+			if !ok {
+				err = fmt.Errorf("response body is not a string, cannot use regex capture")
+			} else {
+				re, reErr := regexp.Compile(capture.Regex)
+				if reErr != nil {
+					err = fmt.Errorf("invalid regex for capture '%s': %w", name, reErr)
+				} else {
+					matches := re.FindStringSubmatch(bodyText)
+					if len(matches) > 1 { // 0 is full match, 1+ are capture groups
+						value = matches[1] // Capture the first group
+					} else if len(matches) == 1 {
+						value = matches[0] // Capture the full match if no groups
+					} else {
+						err = fmt.Errorf("regex for capture '%s' did not match", name)
+					}
+				}
+			}
 		default:
 			err = fmt.Errorf("unknown capture type")
 		}
 
 		if err == nil {
-			varContext.SetStep(name, value)
+			varContext.SetLocal(name, value)
 		}
 	}
 }

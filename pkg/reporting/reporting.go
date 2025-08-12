@@ -120,6 +120,10 @@ func (r *Reporter) calculateSummary() {
 	}
 }
 
+func (r *Reporter) GetReport() *Report {
+	return r.report
+}
+
 func (r *Reporter) GenerateReport() error {
 	r.End()
 
