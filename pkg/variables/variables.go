@@ -89,12 +89,23 @@ func (c *Context) Clone() *Context {
 }
 
 // Template interpolation
-var templateRegex = regexp.MustCompile(`\{\{([^}]+)\}\}`)
+var templateRegex = regexp.MustCompile(`\$\{\{([^}]+)\}\}|\{\{([^}]+)\}\}`)
 
 func (c *Context) InterpolateString(input string) (string, error) {
 	return templateRegex.ReplaceAllStringFunc(input, func(match string) string {
-		// Extract variable name from {{varname}}
-		varName := strings.TrimSpace(match[2 : len(match)-2])
+		var varName string
+		if strings.HasPrefix(match, "${{") {
+			// Extract variable name from ${{varname}}
+			varName = strings.TrimSpace(match[3 : len(match)-2])
+		} else {
+			// Extract variable name from {{varname}}
+			varName = strings.TrimSpace(match[2 : len(match)-2])
+		}
+
+		// Handle env.variable syntax
+		if strings.HasPrefix(varName, "env.") {
+			varName = strings.TrimPrefix(varName, "env.")
+		}
 
 		value, exists := c.Get(varName)
 		if !exists {

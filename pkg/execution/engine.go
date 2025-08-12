@@ -2,6 +2,7 @@ package execution
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/nulln0ne/fuego/pkg/assertions"
@@ -67,13 +68,18 @@ func (e *Engine) executeScenario(sc *scenario.Scenario) reporting.ScenarioResult
 	// Create scenario-specific variable context
 	scenarioContext := e.varContext.Clone()
 
+	// Add environment variables
+	for k, v := range sc.Env {
+		scenarioContext.SetGlobal(k, v)
+	}
+
 	// Add scenario variables
 	for k, v := range sc.Variables {
 		scenarioContext.SetLocal(k, v)
 	}
 
 	// Apply environment-specific configuration if specified
-	if sc.Config.Environment != "" {
+	if sc.Config != nil && sc.Config.Environment != "" {
 		if envConfig, exists := e.config.GetEnvironment(sc.Config.Environment); exists {
 			for k, v := range envConfig.Variables {
 				scenarioContext.SetLocal(k, v)
@@ -81,12 +87,27 @@ func (e *Engine) executeScenario(sc *scenario.Scenario) reporting.ScenarioResult
 		}
 	}
 
-	// Execute setup steps
+	// Execute before hook
+	if sc.Before != nil {
+		for _, step := range sc.Before.Steps {
+			stepResult := e.executeStep(&step, scenarioContext)
+			result.Steps = append(result.Steps, stepResult)
+			if stepResult.Status == "failed" {
+				result.Status = "failed"
+				result.Error = fmt.Sprintf("Before hook step '%s' failed", step.Name)
+				result.EndTime = time.Now()
+				result.Duration = result.EndTime.Sub(result.StartTime)
+				return result
+			}
+		}
+	}
+
+	// Execute setup steps (legacy)
 	if len(sc.Setup) > 0 {
 		for _, step := range sc.Setup {
 			stepResult := e.executeStep(&step, scenarioContext)
 			result.Steps = append(result.Steps, stepResult)
-			if stepResult.Status == "failed" && sc.Config.FailFast {
+			if stepResult.Status == "failed" && sc.Config != nil && sc.Config.FailFast {
 				result.Status = "failed"
 				result.Error = fmt.Sprintf("Setup step '%s' failed", step.Name)
 				result.EndTime = time.Now()
@@ -96,21 +117,44 @@ func (e *Engine) executeScenario(sc *scenario.Scenario) reporting.ScenarioResult
 		}
 	}
 
-	// Execute main steps
-	for _, step := range sc.Steps {
-		stepResult := e.executeStep(&step, scenarioContext)
-		result.Steps = append(result.Steps, stepResult)
+	// Execute main steps (legacy format)
+	if len(sc.Steps) > 0 {
+		for _, step := range sc.Steps {
+			stepResult := e.executeStep(&step, scenarioContext)
+			result.Steps = append(result.Steps, stepResult)
 
-		if stepResult.Status == "failed" && sc.Config.FailFast {
-			result.Status = "failed"
-			result.Error = fmt.Sprintf("Step '%s' failed", step.Name)
-			break
+			if stepResult.Status == "failed" && sc.Config != nil && sc.Config.FailFast {
+				result.Status = "failed"
+				result.Error = fmt.Sprintf("Step '%s' failed", step.Name)
+				break
+			}
 		}
 	}
 
-	// Execute teardown steps
+	// Execute test groups (new format)
+	if len(sc.Tests) > 0 {
+		if sc.Config != nil && sc.Config.Parallel {
+			// Execute tests concurrently
+			e.executeTestsConcurrently(sc.Tests, scenarioContext, &result)
+		} else {
+			// Execute tests sequentially
+			for testName, test := range sc.Tests {
+				e.executeTestGroup(test, testName, scenarioContext, &result)
+			}
+		}
+	}
+
+	// Execute teardown steps (legacy)
 	if len(sc.Teardown) > 0 {
 		for _, step := range sc.Teardown {
+			stepResult := e.executeStep(&step, scenarioContext)
+			result.Steps = append(result.Steps, stepResult)
+		}
+	}
+
+	// Execute after hook
+	if sc.After != nil {
+		for _, step := range sc.After.Steps {
 			stepResult := e.executeStep(&step, scenarioContext)
 			result.Steps = append(result.Steps, stepResult)
 		}
@@ -134,6 +178,48 @@ func (e *Engine) executeScenario(sc *scenario.Scenario) reporting.ScenarioResult
 	return result
 }
 
+func (e *Engine) executeTestsConcurrently(tests map[string]*scenario.TestGroup, varContext *variables.Context, result *reporting.ScenarioResult) {
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for testName, test := range tests {
+		wg.Add(1)
+		go func(name string, t *scenario.TestGroup) {
+			defer wg.Done()
+			testVarContext := varContext.Clone()
+
+			mu.Lock()
+			e.executeTestGroup(t, name, testVarContext, result)
+			mu.Unlock()
+		}(testName, test)
+	}
+
+	wg.Wait()
+}
+
+func (e *Engine) executeTestGroup(test *scenario.TestGroup, testName string, varContext *variables.Context, result *reporting.ScenarioResult) {
+	if test.Skip {
+		return
+	}
+
+	// Add test-level environment variables
+	for k, v := range test.Env {
+		varContext.SetLocal(k, v)
+	}
+
+	// Execute test steps
+	for _, step := range test.Steps {
+		stepResult := e.executeStep(&step, varContext)
+		result.Steps = append(result.Steps, stepResult)
+
+		if stepResult.Status == "failed" && !test.ContinueOnFail {
+			result.Status = "failed"
+			result.Error = fmt.Sprintf("Test '%s' step '%s' failed", testName, step.Name)
+			break
+		}
+	}
+}
+
 func (e *Engine) executeStep(step *scenario.Step, varContext *variables.Context) reporting.StepResult {
 	result := reporting.StepResult{
 		Step:      step,
@@ -155,10 +241,9 @@ func (e *Engine) executeStep(step *scenario.Step, varContext *variables.Context)
 		// For now, assume all conditions pass
 	}
 
-	// Execute based on step type
-	switch step.Type {
-	case "http":
-		response, err := e.executeHTTPStep(step, varContext)
+	// Handle new HTTP step format
+	if step.HTTP != nil {
+		response, err := e.executeHTTPStepNew(step, varContext)
 		if err != nil {
 			result.Status = "failed"
 			result.Error = err.Error()
@@ -166,32 +251,72 @@ func (e *Engine) executeStep(step *scenario.Step, varContext *variables.Context)
 			result.Response = response
 			result.Status = "passed"
 
-			// Run assertions
-			if len(step.Assertions) > 0 {
-				assertionEngine := assertions.NewEngine(varContext)
-				assertionResults, err := assertionEngine.RunAssertions(step.Assertions, response)
-				if err != nil {
-					result.Status = "failed"
-					result.Error = fmt.Sprintf("Assertion error: %v", err)
-				} else {
-					result.Assertions = assertionResults
+			// Process captures
+			e.processCaptures(step.Capture, response, varContext)
 
-					// Check if any assertion failed
-					for _, assertionResult := range assertionResults {
-						if !assertionResult.Passed {
-							result.Status = "failed"
-							break
-						}
+			// Run checks (new format assertions)
+			if len(step.Check) > 0 || len(step.HTTP.Check) > 0 {
+				checks := step.Check
+				if len(step.HTTP.Check) > 0 {
+					// Merge HTTP-specific checks
+					if checks == nil {
+						checks = make(map[string]interface{})
+					}
+					for k, v := range step.HTTP.Check {
+						checks[k] = v
+					}
+				}
+				assertionResults := e.processChecks(checks, response, varContext)
+				result.Assertions = assertionResults
+
+				// Check if any assertion failed
+				for _, assertionResult := range assertionResults {
+					if !assertionResult.Passed {
+						result.Status = "failed"
+						break
 					}
 				}
 			}
-
-			// Extract variables from response
-			e.extractVariables(step, response, varContext)
 		}
-	default:
-		result.Status = "failed"
-		result.Error = fmt.Sprintf("Unsupported step type: %s", step.Type)
+	} else {
+		// Execute based on step type (legacy format)
+		switch step.Type {
+		case "http":
+			response, err := e.executeHTTPStep(step, varContext)
+			if err != nil {
+				result.Status = "failed"
+				result.Error = err.Error()
+			} else {
+				result.Response = response
+				result.Status = "passed"
+
+				// Run assertions
+				if len(step.Assertions) > 0 {
+					assertionEngine := assertions.NewEngine(varContext)
+					assertionResults, err := assertionEngine.RunAssertions(step.Assertions, response)
+					if err != nil {
+						result.Status = "failed"
+						result.Error = fmt.Sprintf("Assertion error: %v", err)
+					} else {
+						result.Assertions = assertionResults
+
+						// Check if any assertion failed
+						for _, assertionResult := range assertionResults {
+							if !assertionResult.Passed {
+								result.Status = "failed"
+								break
+							}
+						}
+					}
+				}
+
+				// Extract variables from response
+				e.extractVariables(step, response, varContext)
+			}
+		default:
+			result.Status = "failed"
+			result.Error = fmt.Sprintf("Unsupported step type: %s", step.Type)
+		}
 	}
 
 	result.EndTime = time.Now()
@@ -273,4 +398,95 @@ func (e *Engine) extractVariables(step *scenario.Step, response interface{}, var
 		varContext.SetStep("last_status", responseMap["status_code"])
 		varContext.SetStep("last_response", responseMap["body_text"])
 	}
+}
+
+func (e *Engine) executeHTTPStepNew(step *scenario.Step, varContext *variables.Context) (interface{}, error) {
+	// Convert new format to legacy format for HTTP client compatibility
+	legacyStep := &scenario.Step{
+		Name: step.Name,
+		Type: "http",
+		Request: scenario.Request{
+			Method:  step.HTTP.Method,
+			URL:     step.HTTP.URL,
+			Headers: step.HTTP.Headers,
+			Query:   step.HTTP.Query,
+			Body:    step.HTTP.Body,
+		},
+	}
+
+	// Handle JSON body
+	if step.HTTP.JSON != nil {
+		legacyStep.Request.Body = step.HTTP.JSON
+		if legacyStep.Request.Headers == nil {
+			legacyStep.Request.Headers = make(map[string]string)
+		}
+		legacyStep.Request.Headers["Content-Type"] = "application/json"
+	}
+
+	// Handle authentication
+	if step.HTTP.Auth != nil {
+		legacyStep.Request.Auth = step.HTTP.Auth
+	}
+
+	return e.executeHTTPStep(legacyStep, varContext)
+}
+
+func (e *Engine) processCaptures(captures map[string]scenario.Capture, response interface{}, varContext *variables.Context) {
+	for name, capture := range captures {
+		var value interface{}
+		var err error
+
+		switch {
+		case capture.JSONPath != "":
+			value, err = variables.ExtractFromResponse(response.(map[string]interface{}), "json:"+capture.JSONPath)
+		case capture.Header != "":
+			value, err = variables.ExtractFromResponse(response.(map[string]interface{}), "header:"+capture.Header)
+		case capture.Regex != "":
+			// TODO: Implement regex capture
+			err = fmt.Errorf("regex capture not yet implemented")
+		default:
+			err = fmt.Errorf("unknown capture type")
+		}
+
+		if err == nil {
+			varContext.SetStep(name, value)
+		}
+	}
+}
+
+func (e *Engine) processChecks(checks map[string]interface{}, response interface{}, varContext *variables.Context) []assertions.Result {
+	var results []assertions.Result
+	assertionEngine := assertions.NewEngine(varContext)
+
+	// Convert checks to assertions format
+	var assertionList []scenario.Assertion
+	for checkType, expectedValue := range checks {
+		assertion := scenario.Assertion{
+			Type:     checkType,
+			Operator: "eq",
+			Value:    expectedValue,
+		}
+
+		// Handle special check types
+		switch checkType {
+		case "status":
+			assertion.Type = "status_code"
+		}
+
+		assertionList = append(assertionList, assertion)
+	}
+
+	// Run assertions
+	assertionResults, err := assertionEngine.RunAssertions(assertionList, response)
+	if err != nil {
+		// Create a failed result if assertion engine fails
+		results = append(results, assertions.Result{
+			Passed:  false,
+			Message: fmt.Sprintf("Assertion engine error: %v", err),
+		})
+	} else {
+		results = assertionResults
+	}
+
+	return results
 }

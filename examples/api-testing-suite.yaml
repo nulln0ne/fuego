@@ -1,0 +1,97 @@
+version: "1.1"
+name: "API Testing Suite"
+description: "Comprehensive API testing with test groups and request chaining"
+
+env:
+  host: jsonplaceholder.typicode.com
+  protocol: https
+  userID: 1
+
+config:
+  parallel: true
+  http:
+    timeout: 30s
+    followRedirects: true
+    verifySSL: true
+
+before:
+  steps:
+    - name: API Health Check
+      http:
+        url: ${{env.protocol}}://${{env.host}}/posts/1
+        method: GET
+      check:
+        status: 200
+
+tests:
+  user_operations:
+    name: "User Operations"
+    steps:
+      - name: Get User Profile
+        http:
+          url: ${{env.protocol}}://${{env.host}}/users/${{env.userID}}
+          method: GET
+          headers:
+            Accept: application/json
+        capture:
+          userName:
+            jsonpath: $.name
+          userEmail:
+            jsonpath: $.email
+        check:
+          status: 200
+          
+      - name: Get User Posts
+        http:
+          url: ${{env.protocol}}://${{env.host}}/users/${{env.userID}}/posts
+          method: GET
+        check:
+          status: 200
+
+  crud_operations:
+    name: "CRUD Operations"
+    continueOnFail: true
+    steps:
+      - name: Create Post
+        http:
+          url: ${{env.protocol}}://${{env.host}}/posts
+          method: POST
+          headers:
+            Content-Type: application/json
+          json:
+            title: "Test Post"
+            body: "This is a test post created by Fuego"
+            userId: ${{env.userID}}
+        capture:
+          postID:
+            jsonpath: $.id
+        check:
+          status: 201
+          
+      - name: Read Created Post
+        http:
+          url: ${{env.protocol}}://${{env.host}}/posts/${{postID}}
+          method: GET
+        check:
+          status: 200
+          
+      - name: Update Post
+        http:
+          url: ${{env.protocol}}://${{env.host}}/posts/${{postID}}
+          method: PUT
+          json:
+            id: ${{postID}}
+            title: "Updated Test Post"
+            body: "Updated content"
+            userId: ${{env.userID}}
+        check:
+          status: 200
+
+after:
+  steps:
+    - name: Cleanup Verification
+      http:
+        url: ${{env.protocol}}://${{env.host}}/posts/1
+        method: GET
+      check:
+        status: 200

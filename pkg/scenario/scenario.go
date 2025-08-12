@@ -10,23 +10,43 @@ import (
 )
 
 type Scenario struct {
-	Version     string           `yaml:"version" json:"version"`
-	Name        string           `yaml:"name" json:"name"`
-	Description string           `yaml:"description,omitempty" json:"description,omitempty"`
-	Variables   map[string]any   `yaml:"variables,omitempty" json:"variables,omitempty"`
-	Setup       []Step           `yaml:"setup,omitempty" json:"setup,omitempty"`
-	Steps       []Step           `yaml:"steps" json:"steps"`
-	Teardown    []Step           `yaml:"teardown,omitempty" json:"teardown,omitempty"`
-	Config      ScenarioConfig   `yaml:"config,omitempty" json:"config,omitempty"`
-	Metadata    ScenarioMetadata `yaml:"metadata,omitempty" json:"metadata,omitempty"`
+	Version     string                `yaml:"version" json:"version"`
+	Name        string                `yaml:"name" json:"name"`
+	Description string                `yaml:"description,omitempty" json:"description,omitempty"`
+	Env         map[string]any        `yaml:"env,omitempty" json:"env,omitempty"`
+	Variables   map[string]any        `yaml:"variables,omitempty" json:"variables,omitempty"`
+	Config      *ScenarioConfig       `yaml:"config,omitempty" json:"config,omitempty"`
+	Before      *TestGroup            `yaml:"before,omitempty" json:"before,omitempty"`
+	Setup       []Step                `yaml:"setup,omitempty" json:"setup,omitempty"`
+	Steps       []Step                `yaml:"steps,omitempty" json:"steps,omitempty"`
+	Tests       map[string]*TestGroup `yaml:"tests,omitempty" json:"tests,omitempty"`
+	Teardown    []Step                `yaml:"teardown,omitempty" json:"teardown,omitempty"`
+	After       *TestGroup            `yaml:"after,omitempty" json:"after,omitempty"`
+	Metadata    ScenarioMetadata      `yaml:"metadata,omitempty" json:"metadata,omitempty"`
+}
+
+type TestGroup struct {
+	Name           string         `yaml:"name,omitempty" json:"name,omitempty"`
+	Env            map[string]any `yaml:"env,omitempty" json:"env,omitempty"`
+	Skip           bool           `yaml:"skip,omitempty" json:"skip,omitempty"`
+	ContinueOnFail bool           `yaml:"continueOnFail,omitempty" json:"continueOnFail,omitempty"`
+	Steps          []Step         `yaml:"steps" json:"steps"`
 }
 
 type ScenarioConfig struct {
+	HTTP        *HTTPConfig   `yaml:"http,omitempty" json:"http,omitempty"`
 	Parallel    bool          `yaml:"parallel,omitempty" json:"parallel,omitempty"`
+	Concurrency int           `yaml:"concurrency,omitempty" json:"concurrency,omitempty"`
 	Timeout     time.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 	Retries     int           `yaml:"retries,omitempty" json:"retries,omitempty"`
 	FailFast    bool          `yaml:"fail_fast,omitempty" json:"fail_fast,omitempty"`
 	Environment string        `yaml:"environment,omitempty" json:"environment,omitempty"`
+}
+
+type HTTPConfig struct {
+	Timeout         time.Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	FollowRedirects bool          `yaml:"followRedirects,omitempty" json:"followRedirects,omitempty"`
+	VerifySSL       bool          `yaml:"verifySSL,omitempty" json:"verifySSL,omitempty"`
 }
 
 type ScenarioMetadata struct {
@@ -41,8 +61,11 @@ type ScenarioMetadata struct {
 type Step struct {
 	Name        string                 `yaml:"name" json:"name"`
 	Description string                 `yaml:"description,omitempty" json:"description,omitempty"`
-	Type        string                 `yaml:"type" json:"type"` // http, grpc, websocket, etc.
+	Type        string                 `yaml:"type,omitempty" json:"type,omitempty"` // http, grpc, websocket, etc.
+	HTTP        *HTTPStep              `yaml:"http,omitempty" json:"http,omitempty"`
 	Request     Request                `yaml:"request,omitempty" json:"request,omitempty"`
+	Capture     map[string]Capture     `yaml:"capture,omitempty" json:"capture,omitempty"`
+	Check       map[string]interface{} `yaml:"check,omitempty" json:"check,omitempty"`
 	Assertions  []Assertion            `yaml:"assertions,omitempty" json:"assertions,omitempty"`
 	Variables   map[string]any         `yaml:"variables,omitempty" json:"variables,omitempty"`
 	Condition   string                 `yaml:"condition,omitempty" json:"condition,omitempty"`
@@ -51,6 +74,23 @@ type Step struct {
 	Timeout     time.Duration          `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 	DependsOn   []string               `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
 	Config      map[string]interface{} `yaml:"config,omitempty" json:"config,omitempty"`
+}
+
+type HTTPStep struct {
+	URL     string                 `yaml:"url" json:"url"`
+	Method  string                 `yaml:"method,omitempty" json:"method,omitempty"`
+	Headers map[string]string      `yaml:"headers,omitempty" json:"headers,omitempty"`
+	Query   map[string]string      `yaml:"query,omitempty" json:"query,omitempty"`
+	Body    interface{}            `yaml:"body,omitempty" json:"body,omitempty"`
+	JSON    interface{}            `yaml:"json,omitempty" json:"json,omitempty"`
+	Auth    *AuthConfig            `yaml:"auth,omitempty" json:"auth,omitempty"`
+	Check   map[string]interface{} `yaml:"check,omitempty" json:"check,omitempty"`
+}
+
+type Capture struct {
+	JSONPath string `yaml:"jsonpath,omitempty" json:"jsonpath,omitempty"`
+	Header   string `yaml:"header,omitempty" json:"header,omitempty"`
+	Regex    string `yaml:"regex,omitempty" json:"regex,omitempty"`
 }
 
 type Request struct {
@@ -159,11 +199,47 @@ func validateScenario(scenario *Scenario) error {
 		return fmt.Errorf("scenario name is required")
 	}
 
-	if len(scenario.Steps) == 0 {
-		return fmt.Errorf("scenario must have at least one step")
+	// Validate either steps (legacy) or tests (new format)
+	if len(scenario.Steps) == 0 && len(scenario.Tests) == 0 {
+		return fmt.Errorf("scenario must have either steps or tests")
 	}
 
+	// Validate legacy steps
 	for i, step := range scenario.Steps {
+		if err := validateStep(&step, i); err != nil {
+			return fmt.Errorf("step %d (%s): %w", i+1, step.Name, err)
+		}
+	}
+
+	// Validate test groups
+	for testName, test := range scenario.Tests {
+		if err := validateTestGroup(test, testName); err != nil {
+			return fmt.Errorf("test '%s': %w", testName, err)
+		}
+	}
+
+	// Validate before/after groups
+	if scenario.Before != nil {
+		if err := validateTestGroup(scenario.Before, "before"); err != nil {
+			return fmt.Errorf("before group: %w", err)
+		}
+	}
+
+	if scenario.After != nil {
+		if err := validateTestGroup(scenario.After, "after"); err != nil {
+			return fmt.Errorf("after group: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func validateTestGroup(group *TestGroup, name string) error {
+	if len(group.Steps) == 0 {
+		return fmt.Errorf("test group must have at least one step")
+	}
+
+	for i, step := range group.Steps {
 		if err := validateStep(&step, i); err != nil {
 			return fmt.Errorf("step %d (%s): %w", i+1, step.Name, err)
 		}
@@ -177,6 +253,18 @@ func validateStep(step *Step, index int) error {
 		return fmt.Errorf("step name is required")
 	}
 
+	// Handle new HTTP step format
+	if step.HTTP != nil {
+		if step.HTTP.URL == "" {
+			return fmt.Errorf("HTTP step URL is required")
+		}
+		if step.HTTP.Method == "" {
+			step.HTTP.Method = "GET" // default to GET
+		}
+		return nil
+	}
+
+	// Handle legacy format
 	if step.Type == "" {
 		step.Type = "http" // default to HTTP
 	}
@@ -200,7 +288,7 @@ func validateStep(step *Step, index int) error {
 		if step.Request.Method == "" {
 			step.Request.Method = "GET" // default to GET
 		}
-		if step.Request.URL == "" {
+		if step.Request.URL == "" && step.HTTP == nil {
 			return fmt.Errorf("HTTP request URL is required")
 		}
 	}

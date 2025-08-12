@@ -20,9 +20,9 @@ var rootCmd = &cobra.Command{
 declarative test scenarios, load testing, and comprehensive reporting.
 
 Examples:
-  fuego run test.yaml          Run a test scenario
-  fuego run tests/             Run all tests in directory
-  fuego monitor scenario.yaml  Monitor API endpoints continuously`,
+  fuego run test.yaml              Run a scenario file
+  fuego run tests/                 Run all scenarios in directory
+  fuego run --format json test.yaml   Generate JSON report`,
 }
 
 func Execute() error {

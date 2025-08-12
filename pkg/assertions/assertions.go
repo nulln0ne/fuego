@@ -336,7 +336,7 @@ func (e *Engine) compareEqual(actual, expected interface{}) (bool, string) {
 			return true, fmt.Sprintf("value equals %v", expected)
 		}
 	}
-	
+
 	// Try string conversion for templated values
 	actualStr := fmt.Sprintf("%v", actual)
 	expectedStr := fmt.Sprintf("%v", expected)

@@ -1,17 +1,19 @@
 # Fuego API Testing Framework
 
-Fuego is a comprehensive API testing framework written in Go, designed to be a modern alternative to tools like Postman, Insomnia, and curl.
+Fuego is a comprehensive API testing framework written in Go, designed to be a modern, powerful tool for API testing and validation.
 
 ## Features
 
-- **Declarative test scenarios** written in YAML or JSON
-- **HTTP/REST support** with full method support, headers, query parameters, and body handling
-- **Variable system** with global, local, and step-scoped variables
-- **Template interpolation** for dynamic request values
-- **Comprehensive assertions** including status codes, headers, JSON path, regex, and more
-- **Multiple output formats** - console, JSON, HTML, and Markdown reports
-- **Environment support** for dev/staging/prod configurations
-- **CLI interface** designed for CI/CD integration
+- **Flexible Test Scenarios** - Support for both simple linear scenarios and complex test suites with parallel execution
+- **Multiple Formats** - Both legacy single-scenario format and modern test group format
+- **HTTP/REST Support** - Full method support, headers, query parameters, authentication, and body handling
+- **Variable System** - Global, local, and step-scoped variables with template interpolation
+- **Request Chaining** - Capture data from responses and use in subsequent requests
+- **Comprehensive Assertions** - Status codes, headers, JSON path, regex, performance checks, and more
+- **Multiple Output Formats** - Console, JSON, HTML, and Markdown reports
+- **Environment Support** - Environment-specific configurations for dev/staging/prod
+- **Parallel Execution** - Run test groups concurrently for faster feedback
+- **CI/CD Ready** - Designed for seamless integration into pipelines
 
 ## Quick Start
 
@@ -23,6 +25,7 @@ go build -o fuego ./cmd/fuego
 
 ### Basic Usage
 
+#### Simple Scenario Format
 Create a test scenario file (`test.yaml`):
 
 ```yaml
@@ -54,10 +57,78 @@ steps:
         description: "User ID should be 1"
 ```
 
-Run the test:
+#### Advanced Test Suite Format
+Create a test suite with parallel execution and request chaining:
+
+```yaml
+version: "1.1"
+name: "API Testing Suite"
+
+env:
+  host: jsonplaceholder.typicode.com
+  protocol: https
+  userID: 1
+
+config:
+  parallel: true
+  http:
+    timeout: 30s
+
+before:
+  steps:
+    - name: API Health Check
+      http:
+        url: ${{env.protocol}}://${{env.host}}/posts/1
+        method: GET
+      check:
+        status: 200
+
+tests:
+  user_operations:
+    name: "User Operations"
+    steps:
+      - name: Get User Profile
+        http:
+          url: ${{env.protocol}}://${{env.host}}/users/${{env.userID}}
+          method: GET
+        capture:
+          userName:
+            jsonpath: $.name
+        check:
+          status: 200
+
+  crud_operations:
+    name: "CRUD Operations"
+    steps:
+      - name: Create Post
+        http:
+          url: ${{env.protocol}}://${{env.host}}/posts
+          method: POST
+          json:
+            title: "Test Post"
+            body: "Test content"
+            userId: ${{env.userID}}
+        capture:
+          postID:
+            jsonpath: $.id
+        check:
+          status: 201
+
+after:
+  steps:
+    - name: Cleanup Check
+      http:
+        url: ${{env.protocol}}://${{env.host}}/posts/1
+        method: GET
+      check:
+        status: 200
+```
+
+Run the tests:
 
 ```bash
 ./fuego run test.yaml
+./fuego run api-suite.yaml
 ```
 
 ### Command Line Options
@@ -72,13 +143,16 @@ Run the test:
 # Generate JSON report
 ./fuego run --format json --output report.json test.yaml
 
+# Generate HTML report
+./fuego run --format html --output report.html test.yaml
+
 # Use specific environment
 ./fuego run --env development test.yaml
 ```
 
 ## Scenario Structure
 
-### Basic Structure
+### Simple Scenario Structure (Legacy Format)
 
 ```yaml
 version: "1.0"
@@ -100,15 +174,91 @@ steps:
         value: 200
 ```
 
-### Variable Interpolation
-
-Use `{{variable_name}}` syntax in requests:
+### Test Suite Structure (Modern Format)
 
 ```yaml
+version: "1.1"
+name: "Test Suite Name"
+
+env:
+  host: api.example.com
+  
+config:
+  parallel: true
+  http:
+    timeout: 30s
+
+before:
+  steps:
+    - name: "Setup Step"
+      http:
+        url: "https://{{env.host}}/health"
+        method: GET
+
+tests:
+  test_group_1:
+    name: "User Tests"
+    steps:
+      - name: "Get User"
+        http:
+          url: "https://{{env.host}}/users/1"
+          method: GET
+        capture:
+          userID:
+            jsonpath: $.id
+        check:
+          status: 200
+
+after:
+  steps:
+    - name: "Cleanup"
+      http:
+        url: "https://{{env.host}}/cleanup"
+        method: POST
+```
+
+### Variable Interpolation
+
+Fuego supports two variable interpolation syntaxes:
+
+```yaml
+# Standard syntax
 request:
   url: "{{base_url}}/users/{{user_id}}"
   headers:
     Authorization: "Bearer {{token}}"
+
+# Environment variable syntax (modern format)
+request:
+  url: "${{env.protocol}}://${{env.host}}/users/${{env.userID}}"
+  headers:
+    Authorization: "Bearer ${{capturedToken}}"
+```
+
+### Request Chaining with Captures
+
+Extract data from responses for use in subsequent requests:
+
+```yaml
+- name: "Login"
+  http:
+    url: "/auth/login"
+    method: POST
+    json:
+      username: "user"
+      password: "pass"
+  capture:
+    authToken:
+      jsonpath: $.token
+    userID:
+      jsonpath: $.user.id
+
+- name: "Get User Profile"
+  http:
+    url: "/users/${{userID}}"
+    method: GET
+    headers:
+      Authorization: "Bearer ${{authToken}}"
 ```
 
 ### Supported Assertion Types

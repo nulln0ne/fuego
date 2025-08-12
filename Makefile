@@ -72,6 +72,14 @@ run-example-json: build ## Build and run example scenario with JSON output
 	@echo "Running example scenario (JSON output)..."
 	@$(BUILD_DIR)/$(BINARY_NAME) run --format json $(EXAMPLE_SCENARIO)
 
+run-suite: build ## Build and run API testing suite
+	@echo "Running API testing suite..."
+	@$(BUILD_DIR)/$(BINARY_NAME) run examples/api-testing-suite.yaml
+
+run-suite-verbose: build ## Build and run API testing suite with verbose output
+	@echo "Running API testing suite (verbose)..."
+	@$(BUILD_DIR)/$(BINARY_NAME) run --verbose examples/api-testing-suite.yaml
+
 dev: ## Development mode - format, vet, test, build
 	@$(MAKE) fmt
 	@$(MAKE) vet
