@@ -1,0 +1,81 @@
+version: "1.0"
+name: "Simple API Test"
+description: "A basic API test scenario demonstrating Fuego capabilities"
+
+variables:
+  base_url: "https://jsonplaceholder.typicode.com"
+  user_id: 1
+
+steps:
+  - name: "Get user information"
+    description: "Fetch user details from API"
+    type: http
+    request:
+      method: GET
+      url: "{{base_url}}/users/{{user_id}}"
+      headers:
+        Accept: "application/json"
+        User-Agent: "Fuego/1.0"
+    assertions:
+      - type: status
+        operator: eq
+        value: 200
+        description: "Should return HTTP 200"
+      - type: header
+        field: "Content-Type"
+        operator: contains
+        value: "application/json"
+        description: "Should return JSON content"
+      - type: json_path
+        field: "id"
+        operator: eq
+        value: 1
+        description: "User ID should be 1"
+      - type: json_path
+        field: "name"
+        operator: contains
+        value: "Leanne"
+        description: "Name should contain 'Leanne'"
+
+  - name: "Get user posts"
+    description: "Fetch posts by the user"
+    type: http
+    request:
+      method: GET
+      url: "{{base_url}}/users/{{user_id}}/posts"
+      headers:
+        Accept: "application/json"
+    assertions:
+      - type: status
+        operator: eq
+        value: 200
+        description: "Should return HTTP 200"
+      - type: json_path
+        field: "0.userId"
+        operator: eq
+        value: 1
+        description: "First post should belong to user ID 1"
+
+  - name: "Create a new post"
+    description: "Create a new post for the user"
+    type: http
+    request:
+      method: POST
+      url: "{{base_url}}/posts"
+      headers:
+        Content-Type: "application/json"
+        Accept: "application/json"
+      body:
+        title: "Test Post from Fuego"
+        body: "This is a test post created by Fuego API testing tool"
+        userId: "{{user_id}}"
+    assertions:
+      - type: status
+        operator: eq
+        value: 201
+        description: "Should return HTTP 201 (Created)"
+      - type: json_path
+        field: "title"
+        operator: eq
+        value: "Test Post from Fuego"
+        description: "Title should match"

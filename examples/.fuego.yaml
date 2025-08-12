@@ -1,0 +1,29 @@
+global:
+  headers:
+    User-Agent: "Fuego API Testing Tool/1.0"
+  timeout: 30s
+  variables:
+    api_version: "v1"
+
+defaults:
+  http_timeout: 30s
+  max_retries: 3
+  retry_delay: 1s
+  follow_redirect: true
+  verify_ssl: true
+
+environments:
+  development:
+    base_url: "https://jsonplaceholder.typicode.com"
+    variables:
+      env_name: "dev"
+  
+  staging:
+    base_url: "https://staging-api.example.com"
+    variables:
+      env_name: "staging"
+
+  production:
+    base_url: "https://api.example.com"
+    variables:
+      env_name: "prod"
