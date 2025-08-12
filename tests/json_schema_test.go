@@ -148,7 +148,7 @@ func TestJSONSchemaValidation(t *testing.T) {
 			}
 
 			if result[0].Passed != tt.expectedPassed {
-				t.Errorf("Expected passed=%v, got passed=%v. Message: %s", 
+				t.Errorf("Expected passed=%v, got passed=%v. Message: %s",
 					tt.expectedPassed, result[0].Passed, result[0].Message)
 			}
 

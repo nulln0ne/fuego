@@ -102,7 +102,7 @@ func (e *Engine) executeScenario(sc *scenario.Scenario) reporting.ScenarioResult
 			Path: scenarioDataSource.Path,
 			Data: scenarioDataSource.Data,
 		}
-		
+
 		dataItems, err := e.dataLoader.LoadData(dataSource)
 		if err != nil {
 			result.Status = "failed"
@@ -275,10 +275,10 @@ func (e *Engine) executeDataDrivenTestGroup(test *scenario.TestGroup, testName s
 	for i, dataItem := range dataItems {
 		// Create a new context for this iteration
 		iterationContext := varContext.Clone()
-		
+
 		// Set the data item variable
 		iterationContext.SetStep(test.DataDriven.Variable, dataItem)
-		
+
 		// Execute test steps
 		for _, step := range test.Steps {
 			stepResult := e.executeStep(&step, iterationContext)
@@ -324,17 +324,17 @@ func (e *Engine) executeDataDrivenStep(step *scenario.Step, varContext *variable
 	for i, dataItem := range dataItems {
 		// Create a new context for this iteration
 		iterationContext := varContext.Clone()
-		
+
 		// Set the data item variable
 		iterationContext.SetStep(step.DataDriven.Variable, dataItem)
-		
+
 		// Create a modified step without data-driven config to avoid infinite recursion
 		modifiedStep := *step
 		modifiedStep.DataDriven = nil
 		modifiedStep.Name = fmt.Sprintf("%s (data %d)", step.Name, i+1)
-		
+
 		lastResult = e.executeStep(&modifiedStep, iterationContext)
-		
+
 		// If step fails and we don't want to continue, break
 		if lastResult.Status == "failed" {
 			break

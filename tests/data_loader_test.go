@@ -12,7 +12,7 @@ func TestCSVDataLoader(t *testing.T) {
 	// Create temporary CSV file
 	tempDir := t.TempDir()
 	csvFile := filepath.Join(tempDir, "test.csv")
-	
+
 	csvContent := `id,name,email,active
 1,Alice,alice@example.com,true
 2,Bob,bob@example.com,false
@@ -68,7 +68,7 @@ func TestJSONDataLoader(t *testing.T) {
 	// Create temporary JSON file
 	tempDir := t.TempDir()
 	jsonFile := filepath.Join(tempDir, "test.json")
-	
+
 	jsonContent := `[
 		{"id": 1, "name": "Alice", "score": 95.5},
 		{"id": 2, "name": "Bob", "score": 87.2},
@@ -112,7 +112,7 @@ func TestJSONDataLoader(t *testing.T) {
 
 func TestInlineDataLoader(t *testing.T) {
 	loader := data.NewDataLoader(".")
-	
+
 	// Test with array of objects
 	source := data.DataSource{
 		Type: "inline",
@@ -190,7 +190,7 @@ func TestCSVValueParsing(t *testing.T) {
 	// Test CSV value parsing implicitly through CSV loading
 	tempDir := t.TempDir()
 	csvFile := filepath.Join(tempDir, "types.csv")
-	
+
 	csvContent := `int_val,float_val,bool_val,string_val
 123,123.45,true,hello
 456,789.01,false,world`

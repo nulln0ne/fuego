@@ -46,7 +46,7 @@ func (dl *DataLoader) LoadData(source DataSource) ([]map[string]interface{}, err
 // loadCSV loads data from a CSV file
 func (dl *DataLoader) loadCSV(path string) ([]map[string]interface{}, error) {
 	fullPath := dl.resolvePath(path)
-	
+
 	file, err := os.Open(fullPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open CSV file %s: %w", fullPath, err)
@@ -54,7 +54,7 @@ func (dl *DataLoader) loadCSV(path string) ([]map[string]interface{}, error) {
 	defer file.Close()
 
 	reader := csv.NewReader(file)
-	
+
 	// Read header row
 	headers, err := reader.Read()
 	if err != nil {
@@ -62,7 +62,7 @@ func (dl *DataLoader) loadCSV(path string) ([]map[string]interface{}, error) {
 	}
 
 	var data []map[string]interface{}
-	
+
 	// Read data rows
 	for {
 		record, err := reader.Read()
@@ -90,7 +90,7 @@ func (dl *DataLoader) loadCSV(path string) ([]map[string]interface{}, error) {
 // loadJSON loads data from a JSON file
 func (dl *DataLoader) loadJSON(path string) ([]map[string]interface{}, error) {
 	fullPath := dl.resolvePath(path)
-	
+
 	file, err := os.Open(fullPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open JSON file %s: %w", fullPath, err)
@@ -150,17 +150,17 @@ func (dl *DataLoader) parseCSVValue(value string) interface{} {
 	if intVal, err := strconv.Atoi(value); err == nil {
 		return intVal
 	}
-	
+
 	// Try to parse as float
 	if floatVal, err := strconv.ParseFloat(value, 64); err == nil {
 		return floatVal
 	}
-	
+
 	// Try to parse as boolean
 	if boolVal, err := strconv.ParseBool(value); err == nil {
 		return boolVal
 	}
-	
+
 	// Return as string
 	return value
 }

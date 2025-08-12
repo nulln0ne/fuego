@@ -58,7 +58,7 @@ func (c *Context) GetNested(path string) (interface{}, bool) {
 	// Split path into parts
 	parts := strings.Split(path, ".")
 	rootKey := parts[0]
-	
+
 	// Get the root object
 	current, exists := c.Get(rootKey)
 	if !exists {
